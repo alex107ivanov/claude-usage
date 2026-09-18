@@ -349,19 +349,12 @@ def _arrow(delta):
 def swiftbar_report(r, name=None):
     by_id = {w["id"]: w for w in r["windows"]}
     weekly = by_id.get("seven_day")
-    scoped = [w for w in r["windows"] if w["id"].startswith("scoped:")]
 
     parts, color = [], None
     if weekly:
         delta = weekly["pace"]["delta_pct"] if weekly["pace"] else None
         icon, color = _arrow(delta)
         parts.append(f"{icon} {weekly['pct']:g}%")
-    for w in scoped:
-        delta = w["pace"]["delta_pct"] if w["pace"] else None
-        icon, c = _arrow(delta)
-        parts.append(f"{w['id'][7:8]}{icon}{w['pct']:g}%")
-        if c == "red":
-            color = "red"
     head = " ".join(parts) or "no data"
     if name:
         head = f"{name} {head}"
