@@ -23,11 +23,15 @@ Usage:
     claude_usage.py --swiftbar  # SwiftBar/xbar menu bar plugin output
     claude_usage.py --json      # machine-readable
     claude_usage.py --no-api    # skip the OAuth API even if a token exists
+    claude_usage.py --config-dir ~/.claude-secondary
+                                # track another `claude` login (CLAUDE_CONFIG_DIR);
+                                # uses that login's own credentials, API only
 
 Optional config ~/.config/claude-usage/config.json:
     {"weekly_reset": "2026-07-31T20:00:00"}   # fallback next reset (local time)
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -49,7 +53,36 @@ STALE_AFTER = timedelta(minutes=20)
 
 # ---------------------------------------------------------------- OAuth source
 
-def find_token():
+def _token_from_creds(text):
+    try:
+        return json.loads(text).get("claudeAiOauth", {}).get("accessToken", "") or None
+    except (ValueError, AttributeError):
+        return None
+
+
+def find_token(config_dir=None):
+    if config_dir:
+        # Claude Code keeps a custom CLAUDE_CONFIG_DIR login separate: the
+        # keychain service is suffixed with a hash of the dir, or the creds
+        # live in <dir>/.credentials.json.
+        config_dir = os.path.abspath(os.path.expanduser(config_dir))
+        suffix = hashlib.sha256(config_dir.encode()).hexdigest()[:8]
+        try:
+            out = subprocess.run(
+                ["security", "find-generic-password", "-s",
+                 f"Claude Code-credentials-{suffix}", "-w"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+            tok = _token_from_creds(out)
+            if tok:
+                return tok
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
+            with open(os.path.join(config_dir, ".credentials.json")) as f:
+                return _token_from_creds(f.read())
+        except OSError:
+            return None
     for var in ("CLAUDE_USAGE_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"):
         tok = os.environ.get(var, "").strip()
         if tok:
@@ -66,12 +99,9 @@ def find_token():
             ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
             capture_output=True, text=True, timeout=5,
         ).stdout.strip()
-        tok = json.loads(out).get("claudeAiOauth", {}).get("accessToken", "")
-        if tok:
-            return tok
-    except (OSError, ValueError, subprocess.SubprocessError):
-        pass
-    return None
+        return _token_from_creds(out)
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 def parse_reset(value):
@@ -194,13 +224,13 @@ def pace(pct, resets_at, now, period=WEEK):
     }
 
 
-def analyze(use_api=True, now=None):
+def analyze(use_api=True, now=None, config_dir=None):
     now = now or datetime.now()
     result = {"source": None, "windows": []}
 
     api = None
     if use_api:
-        token = find_token()
+        token = find_token(config_dir)
         if token:
             api = fetch_api_usage(token)
 
@@ -227,6 +257,10 @@ def analyze(use_api=True, now=None):
         result["sampled_at"] = now
         result["stale"] = False
         return result
+
+    if config_dir:
+        # The desktop cache belongs to the primary login, not this one.
+        raise SystemExit("No data: OAuth API unavailable for " + config_dir)
 
     # Fallback: desktop app cache.
     samples = load_samples()
@@ -312,7 +346,7 @@ def _arrow(delta):
     return "●", None
 
 
-def swiftbar_report(r):
+def swiftbar_report(r, name=None):
     by_id = {w["id"]: w for w in r["windows"]}
     weekly = by_id.get("seven_day")
     scoped = [w for w in r["windows"] if w["id"].startswith("scoped:")]
@@ -329,6 +363,8 @@ def swiftbar_report(r):
         if c == "red":
             color = "red"
     head = " ".join(parts) or "no data"
+    if name:
+        head = f"{name} {head}"
     if r["stale"]:
         head += " ⚠︎"
     lines = [head + (f" | color={color}" if color else "")]
@@ -352,8 +388,18 @@ def swiftbar_report(r):
     return "\n".join(lines)
 
 
+def _arg(flag):
+    if flag in sys.argv:
+        i = sys.argv.index(flag)
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return None
+
+
 if __name__ == "__main__":
-    r = analyze(use_api="--no-api" not in sys.argv)
+    config_dir = _arg("--config-dir")
+    name = _arg("--name")
+    r = analyze(use_api="--no-api" not in sys.argv, config_dir=config_dir)
     if "--json" in sys.argv:
         out = dict(r)
         out["sampled_at"] = r["sampled_at"].isoformat()
@@ -363,6 +409,6 @@ if __name__ == "__main__":
         ]
         print(json.dumps(out, indent=2))
     elif "--swiftbar" in sys.argv:
-        print(swiftbar_report(r))
+        print(swiftbar_report(r, name))
     else:
         print(console_report(r))

@@ -79,3 +79,8 @@ in `~/.config/claude-usage/config.json`:
 ```json
 { "weekly_reset": "2026-07-31T20:00:00" }
 ```
+
+For a second login (e.g. an alias `CLAUDE_CONFIG_DIR=~/.claude-secondary claude`),
+`swiftbar/claude-secondary-usage.5m.sh` runs
+`claude_usage.py --swiftbar --config-dir ~/.claude-secondary --name 2ⁿᵈ`, which
+reads that login's own credentials (API only; no desktop-cache fallback).
