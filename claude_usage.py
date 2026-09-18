@@ -353,8 +353,8 @@ def swiftbar_report(r, name=None):
     parts, color = [], None
     if weekly:
         delta = weekly["pace"]["delta_pct"] if weekly["pace"] else None
-        icon, color = _arrow(delta)
-        parts.append(f"{icon} {weekly['pct']:g}%")
+        _, color = _arrow(delta)
+        parts.append(f"{weekly['pct']:g}%")
     head = " ".join(parts) or "no data"
     if name:
         head = f"{name} {head}"
